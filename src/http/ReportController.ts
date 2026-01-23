@@ -1,31 +1,44 @@
 import { Request, Response, Router } from "express";
-import { container } from "../infra/container";
-import { TYPES } from "../types";
-import { ReportService } from "../domain/ReportService";
-import { InvalidReportSizeError } from "../domain/InvalidReportSizeError";
+import { criarPedido, obterPedido } from "../domain/Order";
+import { publish } from "../infra/EventBus";
 
 const router = Router();
 
-router.get("/relatorio/:n", async (req: Request, res: Response) => {
+router.get("/relatorio/:n", (req: Request, res: Response) => {
   try {
     const n = Number(req.params.n);
     const email = req.query.email as string;
 
     if (!email) {
-      return res.status(400).json({ error: "Email é obrigatório" });
+      return res.status(400).json({ erro: "Email obrigatório" });
     }
 
-    const service = container.get<ReportService>(TYPES.ReportService);
-    await service.generateAndSend(email, n);
-
-    res.status(200).json({ message: "Relatório enviado com sucesso" });
-  } catch (error) {
-    if (error instanceof InvalidReportSizeError) {
-      return res.status(400).json({ error: error.message });
+    if (n <= 0 || n > 10) {
+      return res.status(400).json({ erro: "N deve ser 1-10" });
     }
 
-    res.status(500).json({ error: "Erro interno do servidor" });
+    const pedido = criarPedido(email, n);
+    publish("process:fetch", { idPedido: pedido.id });
+
+    res.status(202).json({
+      mensagem: "Pedido criado",
+      idPedido: pedido.id,
+      status: pedido.status
+    });
+  } catch (erro: any) {
+    res.status(500).json({ erro: "Erro" });
   }
+});
+
+router.get("/status/:idPedido", (req: Request, res: Response) => {
+  const { idPedido } = req.params;
+  const pedido = obterPedido(idPedido);
+
+  if (!pedido) {
+    return res.status(404).json({ erro: "Pedido não encontrado" });
+  }
+
+  res.status(200).json(pedido);
 });
 
 export { router };
